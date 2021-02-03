@@ -83,7 +83,9 @@ func (rf *Raft) run() {
 				rf.role = Follower
 				rf.lock.Unlock()
 			case <-rf.chanWinElect:
+				log.Printf("[candidate] win vote, become leader, server: %v", rf.peers.Local)
 			case <-time.After(time.Millisecond * time.Duration(rand.Intn(300)+200)): //重新进入candidate，进行新一轮选举
+				log.Printf("[candidate] vote timeout, re-enter vote, server: %v", rf.peers.Local)
 			}
 
 		case Follower:
@@ -91,12 +93,14 @@ func (rf *Raft) run() {
 			case <-rf.chanHeartbeat:
 			case <-rf.chanVote:
 			case <-time.After(time.Millisecond * time.Duration(rand.Intn(300)+200)):
+				log.Printf("[follow], wait heartbeat timeout, become candidate, server: %v", rf.peers.Local)
 				rf.lock.Lock()
 				rf.role = Candidate
 				rf.lock.Unlock()
 			}
 
 		case Leader:
+			log.Printf("[leader], boradcast, server: %v", rf.peers.Local)
 			go rf.broadcastAppend()
 			time.Sleep(time.Millisecond * 60)
 		}
