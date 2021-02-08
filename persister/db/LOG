@@ -1,0 +1,6 @@
+=============== Feb 5, 2021 (CST) ===============
+01:08:14.420915 log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed
+01:08:14.471919 db@open opening
+01:08:14.475919 version@stat F·[] S·0B[] Sc·[]
+01:08:14.477920 db@janitor F·2 G·0
+01:08:14.478922 db@open done T·7.0027ms

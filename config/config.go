@@ -8,10 +8,10 @@ import (
 )
 
 type Config struct {
-	Local string   `json:"local"`
-	Peers []string `json:"peers"`
+	Local  string   `json:"local"`
+	Peers  []string `json:"peers"`
+	DbPath string   `json:"db_path"`
 }
-
 
 func InitConfig(fileName string) *Config {
 	var c Config
