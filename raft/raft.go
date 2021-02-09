@@ -21,10 +21,11 @@ const (
 	Candidate
 )
 
-func MakeRaftServer(configFile string, chanApply chan ApplyMsg) {
+func MakeRaftServer(configFile string, chanApply chan ApplyMsg) *Raft{
 	rf := &Raft{}
 	rf.init(configFile, chanApply)
-	rf.run()
+	go rf.run()
+	return rf
 }
 
 type Raft struct {
@@ -32,7 +33,7 @@ type Raft struct {
 	//me   int
 	dead      int32
 	persister *persister.Persister
-	peers     *config.Config
+	Config    *config.Config
 
 	// 所有服务器，持久化状态
 	votedFor string // 当前任期内收到选票的候选者ip,没有则为空
@@ -57,7 +58,7 @@ type Raft struct {
 }
 
 func (rf *Raft) init(configFile string, chanApply chan ApplyMsg) {
-	rf.peers = config.InitConfig(configFile)
+	rf.Config = config.InitConfig(configFile)
 	rf.chanHeartbeat = make(chan bool, 10)
 	rf.chanWinElect = make(chan bool, 10)
 	rf.chanVote = make(chan bool, 10)
@@ -65,19 +66,19 @@ func (rf *Raft) init(configFile string, chanApply chan ApplyMsg) {
 	rf.role = Follower
 	rf.votedFor = ""
 	rf.lock = sync.Mutex{}
-	rf.persister = persister.InitPersister(rf.peers.DbPath)
+	rf.persister = persister.InitPersister(rf.Config.DbPath)
 	rf.readPersist()
 }
 
 func (rf *Raft) run() {
 
 	rpc.Register(rf)
-	rpc.HandleHTTP()
+	//rpc.HandleHTTP()
 
-	l, err := net.Listen("tcp", rf.peers.Local)
+	l, err := net.Listen("tcp", rf.Config.Local)
 
 	if err != nil {
-		log.Fatalf("init server fail, server: %v, err: %v", rf.peers.Local, err)
+		log.Fatalf("init server fail, server: %v, err: %v", rf.Config.Local, err)
 	}
 	go http.Serve(l, nil)
 
@@ -85,7 +86,7 @@ func (rf *Raft) run() {
 		switch rf.role {
 		case Candidate:
 			rf.lock.Lock()
-			rf.votedFor = rf.peers.Local
+			rf.votedFor = rf.Config.Local
 			rf.term++
 			rf.voteCount = 1
 			rf.persist()
@@ -97,9 +98,9 @@ func (rf *Raft) run() {
 				rf.role = Follower
 				rf.lock.Unlock()
 			case <-rf.chanWinElect:
-				log.Printf("[candidate] win vote, become leader, server: %v", rf.peers.Local)
+				log.Printf("[candidate] win vote, become leader, server: %v", rf.Config.Local)
 			case <-time.After(time.Millisecond * time.Duration(rand.Intn(300)+200)): //重新进入candidate，进行新一轮选举
-				log.Printf("[candidate] vote timeout, re-enter vote, server: %v", rf.peers.Local)
+				log.Printf("[candidate] vote timeout, re-enter vote, server: %v", rf.Config.Local)
 			}
 
 		case Follower:
@@ -107,14 +108,14 @@ func (rf *Raft) run() {
 			case <-rf.chanHeartbeat:
 			case <-rf.chanVote:
 			case <-time.After(time.Millisecond * time.Duration(rand.Intn(300)+200)):
-				log.Printf("[follow], wait heartbeat timeout, become candidate, server: %v", rf.peers.Local)
+				log.Printf("[follow], wait heartbeat timeout, become candidate, server: %v", rf.Config.Local)
 				rf.lock.Lock()
 				rf.role = Candidate
 				rf.lock.Unlock()
 			}
 
 		case Leader:
-			log.Printf("[leader], boradcast, server: %v", rf.peers.Local)
+			//log.Printf("[leader], boradcast, server: %v", rf.Config.Local)
 			go rf.broadcastAppend()
 			time.Sleep(time.Millisecond * 60)
 		}
@@ -137,14 +138,14 @@ func (rf *Raft) persist() {
 	//rf.mu.Unlock()
 
 	value := w.Bytes()
-	key := rf.peers.Local
+	key := rf.Config.Local
 
 	rf.persister.SaveRaftState([]byte(key), value)
 }
 
 // 从持久化数据中读取, 恢复宕机之前的状态
 func (rf *Raft) readPersist() {
-	key := rf.peers.Local
+	key := rf.Config.Local
 
 	value, _ := rf.persister.ReadRaftState([]byte(key))
 
@@ -166,13 +167,13 @@ func (rf *Raft) broadcastVote() {
 	rf.lock.Lock()
 	args := &RequestVoteArgs{
 		Term:         rf.term,
-		CandidateId:  rf.peers.Local,
+		CandidateId:  rf.Config.Local,
 		LastLogIndex: rf.lastLogIndex(),
 		LastLogTerm:  rf.lastLogTerm(),
 	}
 	rf.lock.Unlock()
 
-	for _, endpoint := range rf.peers.Peers {
+	for _, endpoint := range rf.Config.Peers {
 		if rf.role == Candidate {
 			go rf.sendRequestVote(endpoint, args, &RequestVoteReply{})
 		}
@@ -248,14 +249,14 @@ func (rf *Raft) sendRequestVote(endpoint string, args *RequestVoteArgs, reply *R
 	if reply.VoteGranted {
 		rf.voteCount++
 		// 得到半数及以上的票
-		if rf.voteCount >= (len(rf.peers.Peers)+1)/2+1 {
+		if rf.voteCount >= (len(rf.Config.Peers)+1)/2+1 {
 			rf.role = Leader
 			rf.nextIndex = make(map[string]int)
 			rf.matchIndex = make(map[string]int)
 
 			nextIdx := rf.lastLogIndex() + 1
 			// 初始化下一次发送的日志的index为当前节点的最新日志
-			for _, endpoint := range rf.peers.Peers {
+			for _, endpoint := range rf.Config.Peers {
 				rf.nextIndex[endpoint] = nextIdx
 			}
 			rf.chanWinElect <- true
@@ -328,14 +329,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 func (rf *Raft) broadcastAppend() {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
-	for i := 0; i < len(rf.peers.Peers); i++ {
+	for i := 0; i < len(rf.Config.Peers); i++ {
 		if rf.role != Leader {
 			continue
 		}
 		go func(endpoint string) {
 			args := AppendEntriesArgs{
 				Term:         rf.term,
-				LeaderId:     rf.peers.Local,
+				LeaderId:     rf.Config.Local,
 				LeaderCommit: rf.commitIndex,
 			}
 			// 前一条日志索引
@@ -345,7 +346,7 @@ func (rf *Raft) broadcastAppend() {
 			}
 			args.Logs = append(args.Logs, rf.logs[args.PrevLogIndex:]...)
 			rf.sendAppendEntries(endpoint, &args, &AppendEntriesReply{})
-		}(rf.peers.Peers[i])
+		}(rf.Config.Peers[i])
 	}
 }
 
@@ -392,14 +393,25 @@ func (rf *Raft) sendAppendEntries(endpoint string, args *AppendEntriesArgs, repl
 
 		// 更新leader commit
 		sortMatchIndex := make([]int, len(rf.matchIndex)+1)
-		sortMatchIndex = append(sortMatchIndex, rf.lastLogIndex())
+		i := 0
+		sortMatchIndex[i] = rf.lastLogIndex()
+		i++
 		for _, v := range rf.matchIndex {
-			sortMatchIndex = append(sortMatchIndex, v)
+			sortMatchIndex[i] = v
+			i++
 		}
+		//sortMatchIndex = append(sortMatchIndex, rf.lastLogIndex())
+		//for _, v := range rf.matchIndex {
+		//	sortMatchIndex = append(sortMatchIndex, v)
+		//}
 		sort.Ints(sortMatchIndex)
 		// 中位数
-		newCommitIndex := sortMatchIndex[(len(rf.peers.Peers)+1)/2]
+		newCommitIndex := sortMatchIndex[(len(rf.Config.Peers)+1)/2]
 
+		//utils.DPrintf("newCommitIndex:%v", newCommitIndex)
+		//if newCommitIndex > 0{
+		//	utils.DPrintf("newCommitIndex: %v, rf.commitIndex:%v, newCommitIndex.Term: %v, rf.term: %v", newCommitIndex,  rf.commitIndex, rf.logs[newCommitIndex-1].Term,rf.term)
+		//}
 		if newCommitIndex > rf.commitIndex && rf.logs[newCommitIndex-1].Term == rf.term {
 			rf.commitIndex = newCommitIndex
 			go rf.applyLog()
@@ -453,6 +465,28 @@ func (rf *Raft) GetState() (int, bool) {
 	isLeader = rf.role == Leader
 	return term, isLeader
 }
+
+
+func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	index := -1
+	term := -1
+	rf.lock.Lock()
+	defer rf.lock.Unlock()
+	if rf.role != Leader {
+		return -1, -1, false
+	}
+	log := Log{
+		Command: command,
+		Term:    rf.term,
+		Index:   rf.lastLogIndex() + 1,
+	}
+	rf.logs = append(rf.logs, &log)
+	index = len(rf.logs)
+	term = rf.term
+	rf.persist()
+	return index, term, true
+}
+
 
 func (rf *Raft) lastLogIndex() int {
 	return len(rf.logs)
