@@ -17,10 +17,10 @@ type Clerk struct {
 }
 
 // 初始化client
-func MakeClerk() *Clerk {
+func MakeClerk(configPath string) *Clerk {
 	ck := new(Clerk)
 	// TODO 初始化配置集群
-	ck.sm = shardmaster.MakeClerk("")
+	ck.sm = shardmaster.MakeClerk(configPath)
 	ck.config = ck.sm.Query(-1)
 	ck.identity = nrand()
 	ck.seq = 0

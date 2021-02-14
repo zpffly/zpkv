@@ -1,6 +1,6 @@
 {
   "local":"127.0.0.1:30263",
   "peers":["127.0.0.1:30261","127.0.0.1:30262"],
-  "db_path":"db3",
+  "db_path":"db/shardmaster/db3",
   "server_master":"127.0.0.1:40263"
 }

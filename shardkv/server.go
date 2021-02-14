@@ -119,6 +119,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	return nil
 }
 
+// 同步更新配置文件
 func (kv *ShardKV) SyncConfigure(args ReconfigureArgs) bool {
 	for i := 0; i < 3; i++ {
 		idx, _, isLeader := kv.rf.Start(Op{Meth:"Reconfigure", ReCfg:args})
@@ -146,6 +147,8 @@ func (kv *ShardKV) SyncConfigure(args ReconfigureArgs) bool {
 	return false
 }
 
+
+// 响应获取分片数据rpc请求
 func (kv *ShardKV) GetShard(args *GetShardArgs, reply *GetShardReply) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -186,19 +189,34 @@ func StartServer(raftConfigPath, sharkMasterClerkPath string, gid int) *ShardKV 
 	kv.messages = make(map[int]chan Result)
 	kv.taskSeq = make(map[int64]int)
 	kv.sm = shardmaster.MakeClerk(sharkMasterClerkPath)
-	//kv.config = kv.sm.Query(-1)
+
+	// 注册当前集群
+	kv.registerGroup()
 
 	for i := 0; i < shardmaster.NShards; i++ {
 		kv.db[i] = make(map[string]string)
 	}
 
-	//go kv.checkLoop(masters)
 	go kv.loop()
 	go kv.pollConfig()
 	return kv
 }
 
+func (kv *ShardKV) registerGroup() {
+	endpoints := make([]string, 0)
+	endpoints = append(endpoints, kv.rf.Config.Local)
+	endpoints = append(endpoints, kv.rf.Config.Peers...)
+	servers := make(map[int][]string)
+	servers[kv.gid] = endpoints
+	kv.sm.Join(servers)
+	log.Printf("registerGroup success")
+}
+
 func (kv *ShardKV) loop() {
+
+	rpc.Register(kv)
+	rpc.HandleHTTP()
+
 	for entry := range kv.applyCh {
 		request := entry.Command.(Op)
 		var result Result
@@ -308,6 +326,7 @@ func (kv *ShardKV) ApplyReconfigure(args ReconfigureArgs) ReconfigureReply {
 	return reply
 }
 
+// 更新配置文件
 func (kv *ShardKV) pollConfig() {
 	var timeoutChan <-chan time.Time
 	for true {
@@ -352,6 +371,7 @@ func (kv *ShardKV) Reconfigure(newCfg shardmaster.Config) bool {
 	isOK := true
 
 	mergeShards := make(map[int][]int)
+	// 判断当前集群需要从远程获取的shards数据
 	for i := 0; i < shardmaster.NShards; i++ {
 		if newCfg.Shards[i] == kv.gid && kv.config.Shards[i] != kv.gid {
 			gid := kv.config.Shards[i]
@@ -367,6 +387,7 @@ func (kv *ShardKV) Reconfigure(newCfg shardmaster.Config) bool {
 
 	var retMu sync.Mutex
 	var wait sync.WaitGroup
+	// 遍历缺失的shards列表，并向其他集群获取数据
 	for gid, value := range mergeShards {
 		wait.Add(1)
 		go func(gid int, value []int) {
