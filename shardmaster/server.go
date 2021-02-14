@@ -128,6 +128,18 @@ func StartServer(configPath string) *ShardMaster {
 	sm.applyCh = make(chan raft.ApplyMsg)
 	sm.rf = raft.MakeRaftServer(configPath, sm.applyCh)
 
+	rpc.Register(sm)
+	rpc.HandleHTTP()
+
+	l, err := net.Listen("tcp", sm.rf.Config.ServerMaster)
+
+	if err != nil {
+		log.Fatalf("init server fail, server: %v, err: %v", sm.rf.Config.ServerMaster, err)
+	}
+
+	go http.Serve(l, nil)
+
+
 	sm.reflect = make(map[int]chan bool)
 	sm.taskSeq = make(map[int64]int)
 	sm.lastIdx = 0
@@ -137,16 +149,6 @@ func StartServer(configPath string) *ShardMaster {
 }
 
 func (sm *ShardMaster) loop() {
-
-	rpc.Register(sm)
-	rpc.HandleHTTP()
-
-	l, err := net.Listen("tcp", sm.rf.Config.ServerMaster)
-
-	if err != nil {
-		log.Fatalf("init server fail, server: %v, err: %v", sm.rf.Config.ServerMaster, err)
-	}
-	go http.Serve(l, nil)
 
 	for entry := range sm.applyCh {
 		command := entry.Command.(Op)

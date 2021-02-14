@@ -46,7 +46,7 @@ func (ck *Clerk) Get(key string) string {
 				conn, err := ck.getConnection(servers[si])
 				if err != nil {
 					log.Printf("get conn fail, err: %v", err)
-					return ""
+					continue
 				}
 				var reply GetReply
 				err = conn.Call("ShardKV.Get", &args, &reply)

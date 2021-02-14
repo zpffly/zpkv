@@ -186,6 +186,26 @@ func StartServer(raftConfigPath, sharkMasterClerkPath string, gid int) *ShardKV 
 	kv.gid = gid
 	kv.applyCh = make(chan raft.ApplyMsg, 32)
 	kv.rf = raft.MakeRaftServer(raftConfigPath, kv.applyCh)
+
+	err := rpc.Register(kv)
+	if err != nil {
+		panic(err)
+	}
+
+	rpc.HandleHTTP()
+
+	//l, err := net.Listen("tcp", kv.rf.Config.Local)
+	//
+	//if err != nil {
+	//	log.Fatalf("init server fail, server: %v, err: %v", kv.rf.Config.Local, err)
+	//}
+	//go func() {
+	//	err := http.Serve(l, nil)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//}()
+
 	kv.messages = make(map[int]chan Result)
 	kv.taskSeq = make(map[int64]int)
 	kv.sm = shardmaster.MakeClerk(sharkMasterClerkPath)
@@ -214,8 +234,6 @@ func (kv *ShardKV) registerGroup() {
 
 func (kv *ShardKV) loop() {
 
-	rpc.Register(kv)
-	rpc.HandleHTTP()
 
 	for entry := range kv.applyCh {
 		request := entry.Command.(Op)
@@ -338,7 +356,7 @@ func (kv *ShardKV) pollConfig() {
 				}
 			}
 		}
-		timeoutChan = time.After(100 * time.Millisecond)
+		timeoutChan = time.After(1000 * time.Millisecond)
 		<-timeoutChan
 	}
 }
